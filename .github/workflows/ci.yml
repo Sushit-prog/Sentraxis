@@ -57,5 +57,8 @@ jobs:
       - name: Typecheck (mypy)
         run: uv run mypy src
 
+      - name: Apply database migrations
+        run: uv run alembic upgrade head
+
       - name: Tests (unit + integration)
         run: uv run pytest -v
