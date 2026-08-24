@@ -1,0 +1,7 @@
+{
+  "min_primary_coverage": 0.8,
+  "max_spurious_techniques": 4,
+  "max_must_not_violations": 0,
+  "max_hallucination_events": 2,
+  "max_provider_failures": 6
+}

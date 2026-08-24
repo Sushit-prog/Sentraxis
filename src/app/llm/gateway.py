@@ -74,9 +74,12 @@ class LlmResult:
     cache_key: str
 
 
-def _cache_key(purpose: str, messages: list[dict[str, str]]) -> str:
+def _cache_key(purpose: str, messages: list[dict[str, str]], chain_signature: str) -> str:
     digest = hashlib.sha256(
-        json.dumps({"purpose": purpose, "messages": messages}, sort_keys=True).encode()
+        json.dumps(
+            {"purpose": purpose, "messages": messages, "chain": chain_signature},
+            sort_keys=True,
+        ).encode()
     ).hexdigest()
     return f"llm:cache:{digest}"
 
@@ -85,6 +88,7 @@ class LlmGateway:
     def __init__(self, settings: Settings, redis_client: Any | None = None) -> None:
         self.settings = settings
         self.redis = redis_client
+        self._cooldown_until: dict[str, float] = {}
         self.providers: list[ProviderSpec] = []
         keys = {
             "groq": settings.groq_api_key.get_secret_value(),
@@ -112,6 +116,28 @@ class LlmGateway:
     def has_providers(self) -> bool:
         return bool(self.providers)
 
+    # ---- redis safety ------------------------------------------------------
+
+    def _redis_get(self, key: str) -> Any | None:
+        """Redis read that degrades to None on outage (cache miss semantics)."""
+        if not self.redis:
+            return None
+        try:
+            return self.redis.get(key)
+        except Exception as exc:  # noqa: BLE001 - cache must never break calls
+            logger.warning("redis_unavailable_cache_disabled", error=str(exc)[:120])
+            self.redis = None  # stop retrying for this gateway lifetime
+            return None
+
+    def _redis_write(self, fn: Any) -> None:
+        if not self.redis:
+            return
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("redis_write_failed", error=str(exc)[:120])
+            self.redis = None
+
     # ---- budget / pacing -------------------------------------------------
 
     def _budget_allows(self, spec: ProviderSpec) -> bool:
@@ -119,7 +145,7 @@ class LlmGateway:
             return True
         today = datetime.now(UTC).strftime("%Y%m%d")
         key = f"llm:budget:{spec.name}:{today}"
-        count = self.redis.get(key)
+        count = self._redis_get(key)
         return int(count or 0) < self.settings.llm_daily_budget
 
     def _record_budget_spend(self, spec: ProviderSpec) -> None:
@@ -127,19 +153,44 @@ class LlmGateway:
             return
         today = datetime.now(UTC).strftime("%Y%m%d")
         key = f"llm:budget:{spec.name}:{today}"
-        pipe = self.redis.pipeline()
-        pipe.incr(key, 1)
-        pipe.expire(key, 172_800)
-        pipe.execute()
+
+        def _spend() -> None:
+            assert self.redis is not None  # guarded by _redis_write
+            pipe = self.redis.pipeline()
+            pipe.incr(key, 1)
+            pipe.expire(key, 172_800)
+            pipe.execute()
+
+        self._redis_write(_spend)
 
     def _pace(self, spec: ProviderSpec) -> None:
+        # Shared cooldown: after any 429 we hold ALL traffic for that provider
+        # until the window clears, so consecutive cases never re-pay the penalty.
+        cooldown_left = self._cooldown_until.get(spec.name, 0.0) - time.monotonic()
+        if cooldown_left > 0:
+            time.sleep(cooldown_left)
+
         if not self.redis or self.settings.llm_min_interval_ms <= 0:
             return
         key = f"llm:minint:{spec.name}"
-        # SET NX PX acts as a minimal spacing gate; if held, wait one interval.
-        acquired = self.redis.set(key, "1", nx=True, px=self.settings.llm_min_interval_ms)
-        if not acquired:
+
+        def _try_acquire() -> bool | None:
+            if self.redis is None:
+                return True  # pacing disabled: proceed unpaced
+            try:
+                return self.redis.set(key, "1", nx=True, px=self.settings.llm_min_interval_ms)
+            except Exception as exc:  # noqa: BLE001 - pacing is best-effort
+                logger.debug("pace_gate_unavailable", error=str(exc)[:120])
+                return True
+
+        acquired = _try_acquire()
+        if acquired is False:
             time.sleep(self.settings.llm_min_interval_ms / 1000.0)
+
+    def _engage_cooldown(self, spec: ProviderSpec, seconds: float) -> None:
+        deadline = time.monotonic() + seconds
+        self._cooldown_until[spec.name] = max(self._cooldown_until.get(spec.name, 0.0), deadline)
+        logger.warning("provider_cooldown_engaged", provider=spec.name, seconds=round(seconds, 1))
 
     # ---- public surface ---------------------------------------------------
 
@@ -155,25 +206,30 @@ class LlmGateway:
         if not self.has_providers:
             raise NoProvidersConfigured("no LLM provider keys configured")
 
-        key = _cache_key(purpose, messages)
-        if bust_cache_key and self.redis and bust_cache_key == key:
-            self.redis.delete(key)
+        chain_sig = ",".join(f"{p.name}:{p.model}" for p in self.providers)
+        key = _cache_key(purpose, messages, chain_sig)
+        if bust_cache_key and bust_cache_key == key:
 
-        if self.redis:
-            cached = self.redis.get(key)
-            if cached:
-                data = json.loads(cached)
-                return LlmResult(
-                    payload=data["payload"],
-                    raw_content=data["raw_content"],
-                    provider=data["provider"],
-                    model=data["model"],
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    latency_ms=0,
-                    cache_hit=True,
-                    cache_key=key,
-                )
+            def _bust() -> None:
+                assert self.redis is not None  # guarded by _redis_write
+                self.redis.delete(key)
+
+            self._redis_write(_bust)
+
+        cached = self._redis_get(key)
+        if cached:
+            data = json.loads(cached)
+            return LlmResult(
+                payload=data["payload"],
+                raw_content=data["raw_content"],
+                provider=data["provider"],
+                model=data["model"],
+                prompt_tokens=0,
+                completion_tokens=0,
+                latency_ms=0,
+                cache_hit=True,
+                cache_key=key,
+            )
 
         errors: list[str] = []
         for spec in self.providers:
@@ -209,20 +265,38 @@ class LlmGateway:
                 if exc.response.status_code not in _RETRY_STATUS:
                     raise
                 last_error = exc
-                # Free tiers signal exact cooldowns via Retry-After; honor them
-                # precisely instead of blind exponential backoff.
-                retry_after = exc.response.headers.get("retry-after")
-                if exc.response.status_code == 429 and retry_after:
-                    try:
-                        time.sleep(min(float(retry_after) + random.random(), 60.0))
-                        continue
-                    except ValueError:
-                        pass
+                if exc.response.status_code == 429:
+                    wait_s = self._extract_429_wait(exc)
+                    self._engage_cooldown(spec, min(wait_s, 90.0))
+                    continue
             except httpx.TimeoutException as exc:
                 last_error = exc
             backoff = 2.0 * (2 ** (attempt - 1)) * (1 + random.random() * 0.25)
             time.sleep(backoff)
         raise GatewayError(f"{spec.name}: exhausted {attempts} attempts: {last_error}")
+
+    @staticmethod
+    def _extract_429_wait(exc: httpx.HTTPStatusError) -> float:
+        """Best-effort cooldown seconds from header or Groq's body hint."""
+        header = exc.response.headers.get("retry-after")
+        if header:
+            try:
+                return float(header)
+            except ValueError:
+                pass
+        try:
+            body = exc.response.json()
+            message = str(body.get("error", {}).get("message", ""))
+        except Exception:  # noqa: BLE001 - body may not be JSON
+            message = ""
+        # Groq phrasing: "...try again in 12.5s" / "in 850ms"
+        import re as _re
+
+        match = _re.search(r"try again in ([0-9.]+)\s*(ms|s)", message)
+        if match:
+            value = float(match.group(1))
+            return value / 1000.0 if match.group(2) == "ms" else value
+        return 20.0
 
     def _call_once(
         self, spec: ProviderSpec, purpose: str, messages: list[dict[str, str]], key: str
@@ -274,7 +348,9 @@ class LlmGateway:
             cache_hit=False,
             cache_key=key,
         )
-        if self.redis:
+
+        def _cache_write() -> None:
+            assert self.redis is not None
             self.redis.setex(
                 key,
                 86_400,
@@ -287,4 +363,6 @@ class LlmGateway:
                     }
                 ),
             )
+
+        self._redis_write(_cache_write)
         return result

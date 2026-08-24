@@ -63,6 +63,10 @@ class StubGateway:
                 techniques.append(("T1110", 0.85))
             if any("beacon" in str(d.get("metric")) for d in detections):
                 techniques.append(("T1071", 0.8))
+            if any("upload_bytes" in str(d.get("metric")) for d in detections):
+                techniques.append(("T1041", 0.88))
+            if any("internal_admin_ports" in str(d.get("metric")) for d in detections):
+                techniques.append(("T1021", 0.82))
 
         max_conf = max((c for _, c in techniques), default=0.5)
         payload = {
@@ -108,9 +112,9 @@ def test_safe_stub_full_golden_run(tmp_path: Path) -> None:
     agg = runner.aggregate(per_case)
 
     current = agg["evaluated"]
-    assert agg["cases_total"] == 20
-    assert agg["forward_compat_bucket"] == 2
-    assert current + agg["forward_compat_bucket"] == 20
+    assert agg["cases_total"] == 50
+    assert agg["forward_compat_bucket"] == 6
+    assert current + agg["forward_compat_bucket"] == agg["cases_total"]
     assert agg["failed"] == 0
     assert agg["primary_hits"] >= 14, "all sweep/flood cases should hit primary"
     assert agg["spurious_techniques"] == 0

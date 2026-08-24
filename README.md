@@ -98,7 +98,7 @@ docs/decisions/     # architecture decision records
 | 4 | LLM gateway + agent + golden-set eval + full ATT&CK index      | ✅ live via Groq gpt-oss-120b: 17/17 golden coverage, 0 hallucinations, injection probe held |
 | 5 | Response orchestrator + playbooks + approvals + audit chain    | ✅ ([ADR-007](docs/decisions/ADR-007-blast-radius-hitl.md)) |
 | 6 | Prometheus metrics + security review + abuse-resistance tests  | ✅ ([docs/security.md](docs/security.md)) |
-| 7 | Golden-set evaluation suite + published metrics                | ⬜     |
+| 7 | Golden-set evaluation suite + published metrics                | ✅ 50 cases · threshold gate (`--gate`) · nightly live job ([eval-live.yml](.github/workflows/eval-live.yml)) |
 | 8 | prod-lite deployment + demo scenario + documentation polish    | ⬜     |
 
 ## Limitations (honest, current)

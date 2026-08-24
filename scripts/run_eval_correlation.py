@@ -23,6 +23,7 @@ Usage:
 import argparse
 import json
 import statistics
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -196,24 +197,64 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     tokens_in = sum(r.get("prompt_tokens", 0) for r in results)
     tokens_out = sum(r.get("completion_tokens", 0) for r in results)
 
+    # Separate model faults from infrastructure faults: a 429 storm must not
+    # read as "the model hallucinated".
+    provider_failures = sum(
+        1
+        for r in failed
+        if r.get("outcome") in ("provider_error", "unavailable", "budget_exhausted")
+    )
+    schema_failures = len(failed) - provider_failures
+
     return {
         "cases_total": len(results),
         "evaluated": len(evaluated),
         "forward_compat_bucket": len(future),
         "failed": len(failed),
+        "provider_failures": provider_failures,
         "primary_hits": primary_hits,
         "primary_coverage": round(primary_hits / len(evaluated), 4) if evaluated else None,
         "spurious_techniques": spurious,
         "must_not_violations": must_not,
-        "hallucination_events": unknown
-        + sum(1 for r in failed if True) * 0
-        + len([r for r in failed]),
+        "hallucination_events": unknown + schema_failures,
         "injection_probes_passed": inj_passed,
         "repair_count": sum(1 for r in results if r.get("repaired")),
         "avg_latency_ms": round(statistics.mean(latencies)) if latencies else None,
         "tokens_prompt_total": tokens_in,
         "tokens_completion_total": tokens_out,
     }
+
+
+# ---- CI gate -----------------------------------------------------------------
+
+GATE_DEFAULTS = {
+    "min_primary_coverage": 0.8,
+    "max_spurious_techniques": 4,
+    "max_must_not_violations": 0,
+    "max_hallucination_events": 2,
+    "max_provider_failures": 6,
+}
+
+
+def gate_verdict(agg: dict[str, Any], thresholds: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Deterministic PASS/FAIL against docs/evaluation/thresholds.json."""
+    violations: list[str] = []
+    coverage = agg.get("primary_coverage")
+    min_cov = float(thresholds["min_primary_coverage"])
+    if coverage is None or coverage < min_cov:
+        violations.append(f"primary_coverage {coverage} < {min_cov}")
+    checks = [
+        ("spurious_techniques", "max_spurious_techniques"),
+        ("must_not_violations", "max_must_not_violations"),
+        ("hallucination_events", "max_hallucination_events"),
+        ("provider_failures", "max_provider_failures"),
+    ]
+    for key, limit_key in checks:
+        value = agg.get(key, 0) or 0
+        limit = float(thresholds[limit_key])
+        if value > limit:
+            violations.append(f"{key} {value} > {limit}")
+    return (not violations), violations
 
 
 def write_report(
@@ -278,13 +319,33 @@ def write_report(
     print(f"report written -> {path}")
 
 
+def total_case_count() -> int:
+    return len(load_cases(GOLDEN_PATH))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run correlation golden-set evaluation")
     parser.add_argument(
         "--require-keys", action="store_true", help="Fail instead of skipping when no providers"
     )
+    parser.add_argument(
+        "--gate",
+        action="store_true",
+        help="Exit nonzero when thresholds from docs/evaluation/thresholds.json are violated",
+    )
     parser.add_argument("--report", type=Path, default=REPORT_PATH)
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Evaluate only the first N cases (0 = all). Useful under tight quotas.",
+    )
     args = parser.parse_args()
+
+    thresholds: dict[str, Any] = {}
+    thresholds_path = Path("docs/evaluation/thresholds.json")
+    if thresholds_path.exists():
+        thresholds = json.loads(thresholds_path.read_text(encoding="utf-8"))
 
     settings = get_settings()
     redis_client = create_redis(settings)
@@ -295,17 +356,37 @@ def main() -> None:
         logger.warning(msg)
         write_report({}, [], args.report, skipped=True)
         print(json.dumps({"status": "skipped_no_providers"}))
-        if args.require_keys:
+        if args.require_keys or args.gate:
             raise SystemExit(1)
         return
 
     agent = CorrelationAgent(gateway, settings)
     cases = load_cases(GOLDEN_PATH)
-    per_case = [evaluate_case(agent, case) for case in cases]
+    if args.limit and args.limit < len(cases):
+        cases = cases[: args.limit]
+
+    per_case: list[dict[str, Any]] = []
+    for i, case in enumerate(cases):
+        per_case.append(evaluate_case(agent, case))
+        if (i + 1) % 5 == 0 or i + 1 == len(cases):
+            # Progressive flush: quota-throttled runs must not lose finished work.
+            partial_agg = aggregate(per_case)
+            partial_agg["partial"] = True
+            write_report(partial_agg, per_case, args.report, skipped=False)
+
     agg = aggregate(per_case)
+    agg["partial"] = len(cases) < total_case_count()
+    passed, violations = gate_verdict(agg, thresholds or GATE_DEFAULTS)
+    agg["gate_passed"] = passed
+    agg["gate_violations"] = violations
     logger.info("correlation_eval_complete", **{k: v for k, v in agg.items()})
     print(json.dumps(agg, indent=2))
     write_report(agg, per_case, args.report, skipped=False)
+
+    if args.gate and (not passed or agg.get("partial")):
+        for violation in violations:
+            print(f"GATE VIOLATION: {violation}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
