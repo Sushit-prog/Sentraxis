@@ -1,4 +1,4 @@
-.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean gen-bulk bench eval-detect eval-correlate check-llm
+.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean gen-bulk bench eval-detect eval-correlate check-llm audit-verify
 
 install:
 	uv sync
@@ -59,6 +59,9 @@ eval-correlate:
 
 check-llm:
 	@uv run python -c "from app.config import get_settings; from app.llm.gateway import LlmGateway; g=LlmGateway(get_settings()); print('providers:', [p.name for p in g.providers] or 'NONE - rule-only mode')"
+
+audit-verify:
+	uv run python scripts/verify_audit_chain.py
 
 clean:
 	docker compose down -v

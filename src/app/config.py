@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     corr_window_seconds: int = Field(default=600, ge=1)
     corr_batch_size: int = Field(default=1000, ge=1)
 
+    # Response orchestration (M5)
+    orch_enabled: bool = True
+    orch_poll_interval_s: float = Field(default=2.0, gt=0)
+    orch_batch_size: int = Field(default=200, ge=1)
+    orch_approval_timeout_min: int = Field(default=15, ge=1)
+    orch_min_risk: float = Field(default=0.5, ge=0.0, le=1.0)
+    quarantine_hours: int = Field(default=24, ge=1)
+
     # Auth (M3). The default secret is refused outside dev profiles.
     jwt_secret: SecretStr = SecretStr("dev-insecure-change-me")  # validator blocks this in prod
     jwt_expire_minutes: int = Field(default=480, ge=1)

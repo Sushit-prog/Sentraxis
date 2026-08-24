@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -44,6 +45,8 @@ class EntityRow(Base):
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    quarantined_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (UniqueConstraint("type", "identifier", name="uq_entities_type_identifier"),)
 
@@ -232,3 +235,79 @@ class UserRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class PlaybookRow(Base):
+    """Versioned declarative response playbook.
+
+    Why this data exists: containment decisions must be auditable against an
+    explicit, reviewable definition — never ad-hoc code paths.
+    """
+
+    __tablename__ = "playbooks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_detectors: Mapped[list] = mapped_column(JSONB, nullable=False)
+    requires_external_source: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    min_risk: Mapped[float] = mapped_column(nullable=False)
+    blast_radius: Mapped[str] = mapped_column(String(8), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
+class ActionRow(Base):
+    """One containment action moving through the response state machine.
+
+    Why this data exists: every autonomous or human decision is a tracked
+    object with a blast radius; the state machine + unique idempotency key make
+    duplicate approvals and crash replays structurally impossible.
+    """
+
+    __tablename__ = "actions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    incident_id: Mapped[int] = mapped_column(ForeignKey("incidents.id"), nullable=False)
+    playbook_id: Mapped[int | None] = mapped_column(ForeignKey("playbooks.id"))
+    playbook_version: Mapped[int | None] = mapped_column()
+    action_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    blast_radius: Mapped[str] = mapped_column(String(8), nullable=False)
+    entity_id: Mapped[int] = mapped_column(ForeignKey("entities.id"), nullable=False)
+    params: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    attempt: Mapped[int] = mapped_column(nullable=False)
+    result: Mapped[dict | None] = mapped_column(JSONB)
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    decision_reason: Mapped[str | None] = mapped_column(String(300))
+    idem_key: Mapped[str | None] = mapped_column(String(80), unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuditLogRow(Base):
+    """Append-only hash-chained audit record. Never updated, only appended.
+
+    Why this data exists: tamper-evident accountability for every automated and
+    human decision — the property the problem statement explicitly demands.
+    """
+
+    __tablename__ = "audit_log"
+
+    seq: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    actor: Mapped[str] = mapped_column(String(96), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    ref_type: Mapped[str | None] = mapped_column(String(32))
+    ref_id: Mapped[int | None] = mapped_column(BigInteger)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    hash: Mapped[str] = mapped_column(String(64), nullable=False)

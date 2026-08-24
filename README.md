@@ -85,7 +85,7 @@ docs/decisions/     # architecture decision records
 | 2 | Behavioral baselines + anomaly detectors + detection eval      | ✅ (P=1.0 / R=1.0 / FPR=0) |
 | 3 | Incidents + rule/LLM correlation + JWT/RBAC API                | 🚧 ([ADR-006](docs/decisions/ADR-006-llm-contracts.md)) |
 | 4 | LLM gateway + agent + golden-set eval + full ATT&CK index      | ✅ live via Groq gpt-oss-120b: 17/17 golden coverage, 0 hallucinations, injection probe held |
-| 5 | Response orchestrator + playbooks + approvals + audit chain    | ⬜     |
+| 5 | Response orchestrator + playbooks + approvals + audit chain    | ✅ ([ADR-007](docs/decisions/ADR-007-blast-radius-hitl.md)) |
 | 6 | Observability + load testing + security review                 | ⬜     |
 | 7 | Golden-set evaluation suite + published metrics                | ⬜     |
 | 8 | prod-lite deployment + demo scenario + documentation polish    | ⬜     |
