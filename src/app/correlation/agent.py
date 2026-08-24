@@ -58,7 +58,9 @@ _SYSTEM_PROMPT_TEMPLATE = (
 
 
 def _system_prompt() -> str:
-    return _SYSTEM_PROMPT_TEMPLATE % ", ".join(attack_reference.known_techniques())
+    # Prompt embeds a curated network subset with names (~350 tokens); the
+    # validator still enforces the full ATT&CK index on output.
+    return _SYSTEM_PROMPT_TEMPLATE % attack_reference.prompt_reference_lines()
 
 
 class TechniqueClaim(BaseModel):
@@ -70,14 +72,13 @@ class TechniqueClaim(BaseModel):
     evidence_detection_ids: list[int] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def _against_allowlist(self) -> TechniqueClaim:
+    def _normalize_from_allowlist(self) -> TechniqueClaim:
+        # ID must exist in the allowlist (hard hallucination barrier). Display
+        # name is normalized to the canonical reference rather than rejected:
+        # public ATT&CK naming drifts vs the machine-readable source.
         if not attack_reference.is_known_technique(self.id):
             raise ValueError(f"technique {self.id} is not in the ATT&CK allowlist")
-        expected = attack_reference.technique_name(self.id) or ""
-        if self.name.strip().lower() != expected.lower():
-            raise ValueError(
-                f"technique {self.id} name mismatch: got '{self.name}', expected '{expected}'"
-            )
+        self.name = attack_reference.technique_name(self.id) or self.name
         return self
 
 

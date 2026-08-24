@@ -41,11 +41,11 @@ class Settings(BaseSettings):
     groq_api_key: SecretStr = SecretStr("")
     openrouter_api_key: SecretStr = SecretStr("")
     mistral_api_key: SecretStr = SecretStr("")
-    llm_model_groq: str = "llama-3.3-70b-versatile"
+    llm_model_groq: str = "openai/gpt-oss-120b"
     llm_model_openrouter: str = "meta-llama/llama-3.3-70b-instruct"
     llm_model_mistral: str = "mistral-small-latest"
     llm_request_timeout_s: float = Field(default=25.0, gt=0)
-    llm_min_interval_ms: int = Field(default=1500, ge=0)
+    llm_min_interval_ms: int = Field(default=2500, ge=0)
     llm_daily_budget: int = Field(default=300, ge=1)
     corr_window_seconds: int = Field(default=600, ge=1)
     corr_batch_size: int = Field(default=1000, ge=1)

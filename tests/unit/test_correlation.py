@@ -108,7 +108,7 @@ def test_hallucinated_technique_rejected() -> None:
     assert any("allowlist" in e for e in errors)
 
 
-def test_wrong_technique_name_rejected() -> None:
+def test_wrong_technique_name_normalized_to_canonical() -> None:
     bad = dict(VALID_PAYLOAD)
     bad["techniques"] = [
         {
@@ -118,9 +118,10 @@ def test_wrong_technique_name_rejected() -> None:
             "evidence_detection_ids": [11],
         }
     ]
-    errors = validate_analysis_payload(bad, ALLOWED)
-    assert isinstance(errors, list)
-    assert any("mismatch" in e for e in errors)
+    result = validate_analysis_payload(bad, ALLOWED)
+    assert not isinstance(result, list)
+    # ID was valid; display name normalized to the canonical reference
+    assert result.techniques[0].name == "Network Service Discovery"
 
 
 def test_hallucinated_evidence_rejected() -> None:

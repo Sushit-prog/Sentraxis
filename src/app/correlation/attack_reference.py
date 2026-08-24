@@ -78,3 +78,38 @@ def technique_name(technique_id: str) -> str | None:
 
 def known_techniques() -> list[str]:
     return sorted(_load_index()[0])
+
+
+# Compact, network-behavior-focused subset embedded in prompts. Validation
+# always uses the FULL index; this exists purely to stay inside free-tier
+# token budgets while giving the model named anchors.
+PROMPT_TECHNIQUE_IDS: tuple[str, ...] = (
+    "T1046",
+    "T1595",
+    "T1595.001",
+    "T1595.002",
+    "T1110",
+    "T1110.001",
+    "T1110.003",
+    "T1071",
+    "T1071.001",
+    "T1190",
+    "T1203",
+    "T1498",
+    "T1498.001",
+    "T1499",
+    "T1048",
+    "T1041",
+    "T1078",
+    "T1021",
+    "T1098",
+    "T1027",
+    "T1489",
+    "T1557",
+)
+
+
+def prompt_reference_lines() -> str:
+    """'Txxxx Name' lines for the prompt subset."""
+    idx = _load_index()[0]
+    return "\n".join(f"- {tid} {idx.get(tid, '')}".rstrip() for tid in PROMPT_TECHNIQUE_IDS)

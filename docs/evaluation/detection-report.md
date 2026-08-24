@@ -1,6 +1,6 @@
 # Detection evaluation report
 
-_Generated 2026-08-24T15:20:10.626150+00:00 by scripts/run_eval_detection.py_
+_Generated 2026-08-24T18:11:55.943957+00:00 by scripts/run_eval_detection.py_
 
 | Scenario | Events | Attacks | Benign | Detections | TP | FP | FN | Precision | Recall | FPR |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |

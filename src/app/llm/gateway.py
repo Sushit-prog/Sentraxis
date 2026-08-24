@@ -209,6 +209,15 @@ class LlmGateway:
                 if exc.response.status_code not in _RETRY_STATUS:
                     raise
                 last_error = exc
+                # Free tiers signal exact cooldowns via Retry-After; honor them
+                # precisely instead of blind exponential backoff.
+                retry_after = exc.response.headers.get("retry-after")
+                if exc.response.status_code == 429 and retry_after:
+                    try:
+                        time.sleep(min(float(retry_after) + random.random(), 60.0))
+                        continue
+                    except ValueError:
+                        pass
             except httpx.TimeoutException as exc:
                 last_error = exc
             backoff = 2.0 * (2 ** (attempt - 1)) * (1 + random.random() * 0.25)
@@ -220,7 +229,12 @@ class LlmGateway:
     ) -> LlmResult:
         started = time.monotonic()
         with httpx.Client(
-            timeout=httpx.Timeout(connect=5.0, read=self.settings.llm_request_timeout_s)
+            timeout=httpx.Timeout(
+                connect=5.0,
+                read=self.settings.llm_request_timeout_s,
+                write=self.settings.llm_request_timeout_s,
+                pool=5.0,
+            )
         ) as client:
             response = client.post(
                 f"{spec.base_url}/chat/completions",

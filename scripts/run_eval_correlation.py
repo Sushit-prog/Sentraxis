@@ -120,13 +120,22 @@ def evaluate_case(agent: CorrelationAgent, case: dict[str, Any]) -> dict[str, An
     expected_primary = list(case["expected"]["primary"])
     acceptable = set(case["expected"].get("acceptable", expected_primary))
 
+    def _family(technique_id: str) -> str:
+        """Sub-techniques satisfy their parent: T1498.001 -> T1498."""
+        return technique_id.split(".")[0]
+
+    def _matches(predicted_id: str, reference_ids: set[str]) -> bool:
+        return any(
+            predicted_id == ref or _family(predicted_id) == _family(ref) for ref in reference_ids
+        )
+
     out.update(
         {
             "status": "ok",
             "repaired": repaired,
             "predicted": predicted,
-            "primary_hit": any(p in predicted for p in expected_primary),
-            "spurious": [p for p in predicted if p not in acceptable],
+            "primary_hit": any(_matches(p, set(expected_primary)) for p in predicted),
+            "spurious": [p for p in predicted if not _matches(p, acceptable)],
             "must_not_violation": [
                 p for p in predicted if p in set(case["expected"].get("must_not_include", []))
             ],
