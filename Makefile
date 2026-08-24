@@ -1,4 +1,4 @@
-.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean
+.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean gen-bulk bench
 
 install:
 	uv sync
@@ -14,7 +14,7 @@ fmt-check:
 	uv run ruff format --check .
 
 typecheck:
-	uv run mypy src
+	uv run mypy src scripts
 
 test:
 	uv run pytest -m "not integration"
@@ -42,6 +42,13 @@ migrate:
 	uv run alembic upgrade head
 
 check: lint fmt-check typecheck test-all
+
+# 50k-event synthetic scenario for throughput benchmarking
+gen-bulk:
+	uv run python scripts/generate_bulk_scenario.py --events 50000 --attack-ratio 0.1
+
+bench:
+	uv run python scripts/bench_replay.py --scenario scenarios/bulk_bench.jsonl
 
 clean:
 	docker compose down -v

@@ -55,8 +55,9 @@ def test_invalid_line_fails_fast_before_sending_rest(rclient, tmp_path) -> None:
     with pytest.raises(ValueError, match="line 2"):
         injector.run()
 
-    # only the first line made it to the stream; nothing half-parsed was sent
-    assert rclient.xlen(RAW_STREAM) == 1
+    # Batching contract: the failed line aborts its entire pending chunk, so
+    # nothing half-parsed or partially-validated reaches the stream.
+    assert rclient.xlen(RAW_STREAM) == 0
 
 
 def test_injected_events_flow_through_normalizer_exactly_once(

@@ -1,11 +1,14 @@
 """Replay injector: streams a labeled scenario file into events:raw.
 
 - JSONL scenario format, one CanonicalEvent per line.
-- Checkpointed in Redis (`replay:checkpoint:<name>` = next line index to send),
-  so interrupted replays resume exactly where they stopped.
-- ``--reset`` discards the checkpoint and starts from line 0.
-- Re-running a completed replay against an already-populated DB is safe:
-  duplicates are absorbed downstream by the unique constraint.
+- Messages are validated then pipelined in XADD_BATCH chunks (one round trip
+  per chunk); an invalid line aborts the run and discards its pending chunk,
+  so a broken scenario never partially executes.
+- Checkpointed in Redis (`replay:checkpoint:<name>` = next line index sent),
+  advanced only after each chunk is confirmed, so interrupted replays resume
+  exactly where they stopped. Re-running a completed replay against an
+  already-populated DB is safe: duplicates are absorbed downstream by the
+  unique constraint on event_id.
 """
 
 import argparse
@@ -13,13 +16,13 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import redis
 import structlog
 
 from app.domain.events import CanonicalEvent
-from app.workers.streams import CHECKPOINT_EVERY, RAW_STREAM
+from app.workers.streams import RAW_STREAM, XADD_BATCH
 
 logger = structlog.get_logger(__name__)
 
@@ -93,21 +96,40 @@ class ReplayInjector:
 
         sent = 0
         started_at = time.monotonic()
+        buffer: list[dict[str, str]] = []
+
+        def flush() -> None:
+            """Send buffered messages in one round trip, then checkpoint.
+
+            Checkpoint is advanced only AFTER the batch is confirmed sent, so a
+            crash between XADD and SET replays (idempotently) rather than skips.
+            """
+            nonlocal sent
+            if not buffer:
+                return
+            pipe = self.redis.pipeline(transaction=False)
+            for fields in buffer:
+                pipe.xadd(RAW_STREAM, cast("Any", fields))
+            pipe.execute()
+            self.redis.set(self._key, start + sent)
+            buffer.clear()
+
         for seq in range(start, len(lines)):
             if limit is not None and sent >= limit:
                 break
             payload = self._parse_line(lines[seq], seq)
-            self.redis.xadd(RAW_STREAM, {"payload": payload, "seq": str(seq)})
+            buffer.append({"payload": payload.decode("utf-8"), "seq": str(seq)})
             sent += 1
-            if self.eps > 0:
+            if len(buffer) >= XADD_BATCH:
+                flush()
+            if self.eps > 0 and sent % XADD_BATCH == 0:
+                # pacing per batch keeps max-speed mode truly fast while still
+                # honoring rate limits at lower eps
                 self._pace(sent, started_at)
-            if sent % CHECKPOINT_EVERY == 0:
-                self.redis.set(self._key, start + sent)
+        flush()
 
         next_index = start + sent
         if next_index >= len(lines) and limit is None:
-            self.redis.set(self._key, next_index)
-        elif sent > 0 and (sent % CHECKPOINT_EVERY != 0):
             self.redis.set(self._key, next_index)
 
         summary = InjectionSummary(
