@@ -84,7 +84,7 @@ docs/decisions/     # architecture decision records
 | 1 | Ingestion + normalization + event store + replay injector      | ✅ (1.6k ev/s bench) |
 | 2 | Behavioral baselines + anomaly detectors + detection eval      | ✅ (P=1.0 / R=1.0 / FPR=0) |
 | 3 | Incidents + rule/LLM correlation + JWT/RBAC API                | 🚧 ([ADR-006](docs/decisions/ADR-006-llm-contracts.md)) |
-| 4 | LLM gateway + correlation agent + failure/security tests       | ✅ gateway+agent shipped; live-key wiring pending |
+| 4 | LLM gateway + agent + golden-set eval + full ATT&CK index      | ✅ (697-technique validation; `make eval-correlate` once keys set) |
 | 5 | Response orchestrator + playbooks + approvals + audit chain    | ⬜     |
 | 6 | Observability + load testing + security review                 | ⬜     |
 | 7 | Golden-set evaluation suite + published metrics                | ⬜     |

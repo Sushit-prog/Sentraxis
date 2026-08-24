@@ -1,4 +1,4 @@
-.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean gen-bulk bench eval-detect
+.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean gen-bulk bench eval-detect eval-correlate check-llm
 
 install:
 	uv sync
@@ -53,6 +53,12 @@ bench:
 # Offline detection evaluation (requires full stack + detector worker running)
 eval-detect:
 	uv run python scripts/run_eval_detection.py --scenario scenarios/port_scan_probe.jsonl
+
+eval-correlate:
+	uv run python scripts/run_eval_correlation.py --require-keys
+
+check-llm:
+	@uv run python -c "from app.config import get_settings; from app.llm.gateway import LlmGateway; g=LlmGateway(get_settings()); print('providers:', [p.name for p in g.providers] or 'NONE - rule-only mode')"
 
 clean:
 	docker compose down -v

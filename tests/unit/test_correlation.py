@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.correlation.agent import validate_analysis_payload
-from app.correlation.attack_reference import ATTACK_REFERENCE, is_known_technique
+from app.correlation.attack_reference import is_known_technique, technique_name
 from app.correlation.rules import (
     DetectionFact,
     build_incident_draft,
@@ -77,7 +77,7 @@ VALID_PAYLOAD = {
     "techniques": [
         {
             "id": "T1046",
-            "name": ATTACK_REFERENCE["T1046"],
+            "name": technique_name("T1046"),
             "confidence": 0.8,
             "evidence_detection_ids": [11],
         }

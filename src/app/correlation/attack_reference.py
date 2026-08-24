@@ -1,12 +1,24 @@
-"""Curated MITRE ATT&CK Enterprise technique allowlist.
+"""MITRE ATT&CK Enterprise technique reference for correlation validation.
 
-Validating LLM output against a bundled reference prevents hallucinated
-technique IDs without shipping the full STIX bundle. Upgrade path (M4+):
-replace with RAG over the complete enterprise-attack.json, keeping this module
-as the validation seam.
+Loads the full technique index (id -> name) built from mitre/cti by
+scripts/fetch_attack_reference.py and committed as a compact JSON resource.
+If that resource is missing at import time we degrade to a curated mini
+allowlist so the system still functions — validation coverage is simply
+narrower until the index is regenerated.
+
+This module is the single seam ADR-006 identified for future retrieval-based
+upgrades; callers only ever see is_known_technique()/technique_name().
 """
 
-ATTACK_REFERENCE: dict[str, str] = {
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+from importlib import resources
+from pathlib import Path
+
+# Curated fallback used only when the full index resource is unavailable.
+_MINI_ALLOWLIST: dict[str, str] = {
     "T1046": "Network Service Discovery",
     "T1595": "Active Scanning",
     "T1595.001": "Scanning IP Blocks",
@@ -29,10 +41,40 @@ ATTACK_REFERENCE: dict[str, str] = {
 
 TECHNIQUE_ID_PATTERN = r"^T\d{4}(\.\d{3})?$"
 
+_INDEX_RESOURCE = "attack_index.json"
+
+
+@lru_cache(maxsize=1)
+def _load_index() -> tuple[dict[str, str], str]:
+    """Return (index, source). Full index preferred; mini allowlist as fallback."""
+    try:
+        resource = resources.files("app.correlation").joinpath("data", _INDEX_RESOURCE)
+        if resource.is_file():
+            return json.loads(resource.read_text(encoding="utf-8")), "full-index"
+    except (FileNotFoundError, ModuleNotFoundError, json.JSONDecodeError):
+        pass
+    # dev fallback: repo-relative path (e.g., when running without install)
+    local = Path(__file__).parent / "data" / _INDEX_RESOURCE
+    if local.is_file():
+        return json.loads(local.read_text(encoding="utf-8")), "full-index"
+    return dict(_MINI_ALLOWLIST), "mini-fallback"
+
+
+def index_size() -> int:
+    return len(_load_index()[0])
+
+
+def index_source() -> str:
+    return _load_index()[1]
+
 
 def is_known_technique(technique_id: str) -> bool:
-    return technique_id in ATTACK_REFERENCE
+    return technique_id in _load_index()[0]
 
 
 def technique_name(technique_id: str) -> str | None:
-    return ATTACK_REFERENCE.get(technique_id)
+    return _load_index()[0].get(technique_id)
+
+
+def known_techniques() -> list[str]:
+    return sorted(_load_index()[0])

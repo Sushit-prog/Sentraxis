@@ -58,7 +58,7 @@ _SYSTEM_PROMPT_TEMPLATE = (
 
 
 def _system_prompt() -> str:
-    return _SYSTEM_PROMPT_TEMPLATE % ", ".join(sorted(attack_reference.ATTACK_REFERENCE))
+    return _SYSTEM_PROMPT_TEMPLATE % ", ".join(attack_reference.known_techniques())
 
 
 class TechniqueClaim(BaseModel):
