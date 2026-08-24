@@ -82,7 +82,7 @@ docs/decisions/     # architecture decision records
 | - | -------------------------------------------------------------- | ------ |
 | 0 | Repo foundation: tooling, config, compose, health, CI          | ✅     |
 | 1 | Ingestion + normalization + event store + replay injector      | ✅ (1.6k ev/s bench) |
-| 2 | Behavioral baselines + anomaly detectors + detection eval      | ⬜ ([ADR-004](docs/decisions/ADR-004-detection-engine.md)) |
+| 2 | Behavioral baselines + anomaly detectors + detection eval      | 🚧 slice 1 ([ADR-004](docs/decisions/ADR-004-detection-engine.md), [ADR-005](docs/decisions/ADR-005-db-cursor-detection.md)) |
 | 3 | Incidents (rule correlation) + API + JWT/RBAC                  | ⬜     |
 | 4 | LLM gateway + correlation agent + failure/security tests       | ⬜     |
 | 5 | Response orchestrator + playbooks + approvals + audit chain    | ⬜     |

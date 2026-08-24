@@ -54,11 +54,14 @@ class ReplayInjector:
         self._key = checkpoint_key(self.name)
 
     def _load_lines(self) -> list[str]:
-        lines = [
-            line.strip()
-            for line in self.scenario_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        # Stream line-by-line: avoids the 2-3x transient allocation of
+        # read_text()+splitlines() on large scenario files.
+        lines: list[str] = []
+        with self.scenario_path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if line:
+                    lines.append(line)
         if not lines:
             raise ValueError(f"scenario file is empty: {self.scenario_path}")
         return lines

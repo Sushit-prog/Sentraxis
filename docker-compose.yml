@@ -42,6 +42,21 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  detector:
+    build: .
+    command: ["python", "-m", "app.workers.detector"]
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+psycopg://cyber:cyber@postgres:5432/cyber
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:

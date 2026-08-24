@@ -75,3 +75,75 @@ class EventRow(Base):
         Index("ix_events_src_entity_ts", "src_entity_id", "ts"),
         Index("ix_events_ts", "ts"),
     )
+
+
+class DetectionRow(Base):
+    """Output of one detector firing on one event.
+
+    Why this data exists: detections are the evidence units correlation and
+    response consume. Unique (event_id, detector, version) makes replayed or
+    re-delivered batches storage-idempotent.
+    """
+
+    __tablename__ = "detections"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    entity_id: Mapped[int] = mapped_column(ForeignKey("entities.id"), nullable=False)
+    detector: Mapped[str] = mapped_column(String(64), nullable=False)
+    detector_version: Mapped[int] = mapped_column(nullable=False)
+    score: Mapped[float] = mapped_column(nullable=False)
+    severity: Mapped[int] = mapped_column(nullable=False)
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id", "detector", "detector_version", name="uq_detections_event_detector"
+        ),
+        Index("ix_detections_created", "created_at"),
+        Index("ix_detections_entity", "entity_id"),
+    )
+
+
+class WorkerCursorRow(Base):
+    """Incremental consumption cursors (e.g., detector -> max processed event id).
+
+    Why this data exists: advancing the cursor inside the same transaction as
+    derived writes makes crash recovery exact — restart reprocesses the same
+    batch, unique constraints absorb duplicates.
+    """
+
+    __tablename__ = "worker_cursors"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_event_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class EntityMetricStateRow(Base):
+    """Per-entity streaming metric state (tumbling buckets + Welford history).
+
+    Why this data exists: behavioral deviation requires stored 'normal'.
+    One row per (entity, metric); current partial bucket lives beside the
+    finalized-history statistics.
+    """
+
+    __tablename__ = "entity_metric_state"
+
+    entity_id: Mapped[int] = mapped_column(ForeignKey("entities.id"), primary_key=True)
+    metric: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_seconds: Mapped[int] = mapped_column(nullable=False)
+    cur_bucket_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cur_value: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    cur_extra: Mapped[dict | None] = mapped_column(JSONB)  # e.g. distinct ports, fired flag
+    mean: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    m2: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    n: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

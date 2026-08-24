@@ -1,4 +1,4 @@
-.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean gen-bulk bench
+.PHONY: install lint fmt fmt-check typecheck test test-integration test-all up up-deps down logs migrate check clean gen-bulk bench eval-detect
 
 install:
 	uv sync
@@ -49,6 +49,10 @@ gen-bulk:
 
 bench:
 	uv run python scripts/bench_replay.py --scenario scenarios/bulk_bench.jsonl
+
+# Offline detection evaluation (requires full stack + detector worker running)
+eval-detect:
+	uv run python scripts/run_eval_detection.py --scenario scenarios/port_scan_probe.jsonl
 
 clean:
 	docker compose down -v
