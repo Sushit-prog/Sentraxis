@@ -86,8 +86,14 @@ def rclient(it_settings: Settings):
 
 @pytest.fixture()
 def clean_db(session_factory):
-    """Truncate operational tables before each test (test DB only)."""
+    """Full fresh slate: telemetry + every derived table (test DB only)."""
     with session_factory() as session:
-        session.execute(text("TRUNCATE events, entities RESTART IDENTITY CASCADE"))
+        session.execute(
+            text(
+                "TRUNCATE events, entities, detections, entity_metric_state,"
+                " worker_cursors, incidents, incident_detections, llm_calls"
+                " RESTART IDENTITY CASCADE"
+            )
+        )
         session.commit()
     yield session_factory

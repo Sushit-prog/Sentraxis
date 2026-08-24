@@ -147,3 +147,88 @@ class EntityMetricStateRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class LlmCallRow(Base):
+    """Every LLM interaction's metadata (never prompts/payloads).
+
+    Why this data exists: cost/latency/outcome accounting and the join key for
+    correlation evaluation; outcome taxonomy powers reliability metrics.
+    """
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(96), nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    latency_ms: Mapped[int] = mapped_column(nullable=False, default=0)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error_detail: Mapped[str | None] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IncidentRow(Base):
+    """Correlated attack narrative built from linked detections.
+
+    Why this data exists: the analyst-facing unit — detections explain single
+    signals; incidents tell the story and carry ATT&CK mapping + response state.
+    """
+
+    __tablename__ = "incidents"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    narrative: Mapped[str] = mapped_column(String(4000), nullable=False, default="")
+    risk_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    techniques: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    correlation_mode: Mapped[str] = mapped_column(String(8), nullable=False, default="rules")
+    entity_id: Mapped[int] = mapped_column(ForeignKey("entities.id"), nullable=False)
+    detection_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_incidents_status", "status"),
+        Index("ix_incidents_entity", "entity_id"),
+        Index("ix_incidents_last_seen", "last_seen_at"),
+    )
+
+
+class IncidentDetectionRow(Base):
+    """Evidence linkage between incidents and their constituent detections."""
+
+    __tablename__ = "incident_detections"
+
+    incident_id: Mapped[int] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE"), primary_key=True
+    )
+    detection_id: Mapped[int] = mapped_column(ForeignKey("detections.id"), primary_key=True)
+
+
+class UserRow(Base):
+    """Console user for API authN/Z. Passwords stored as argon2 hashes only."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="analyst")
+    disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

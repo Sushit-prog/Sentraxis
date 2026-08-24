@@ -47,3 +47,23 @@ def test_log_level_normalized_to_uppercase() -> None:
         log_level="debug",
     )
     assert settings.log_level == "DEBUG"
+
+
+def test_prod_rejects_default_jwt_secret() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            database_url="postgresql+psycopg://u:p@h:5432/d",
+            redis_url="redis://localhost:6379/0",
+            app_env="prod",
+        )
+
+
+def test_dev_allows_default_jwt_secret() -> None:
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        database_url="postgresql+psycopg://u:p@h:5432/d",
+        redis_url="redis://localhost:6379/0",
+        app_env="dev",
+    )
+    assert settings.jwt_secret.get_secret_value() == "dev-insecure-change-me"
