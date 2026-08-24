@@ -8,7 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.api.deps import AnalystOrAdmin, AnyRole, DbDep, SettingsDep
+from app.api.deps import AnyRole, ApproverOrAdmin, DbDep, SettingsDep
 from app.persistence.models import ActionRow, UserRow
 
 router = APIRouter(prefix="/actions", tags=["actions"])
@@ -148,7 +148,7 @@ def _effectors() -> dict[str, Any]:
 def approve_action(
     request: Request,
     action_id: int,
-    user: AnalystOrAdmin,
+    user: ApproverOrAdmin,
     db: DbDep,
     settings: SettingsDep,
     body: DecisionBody = _EMPTY_DECISION,
@@ -170,7 +170,7 @@ def approve_action(
 def reject_action(
     request: Request,
     action_id: int,
-    user: AnalystOrAdmin,
+    user: ApproverOrAdmin,
     db: DbDep,
     settings: SettingsDep,
     body: DecisionBody = _EMPTY_DECISION,

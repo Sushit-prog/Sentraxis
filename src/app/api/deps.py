@@ -91,4 +91,5 @@ def require_roles(*allowed: Role) -> Any:
 
 AdminUser = Annotated[UserRow, Depends(require_roles("admin"))]
 AnalystOrAdmin = Annotated[UserRow, Depends(require_roles("admin", "analyst"))]
+ApproverOrAdmin = Annotated[UserRow, Depends(require_roles("admin", "approver"))]
 AnyRole = Annotated[UserRow, Depends(require_roles("admin", "analyst", "approver"))]

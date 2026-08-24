@@ -10,6 +10,7 @@ from app.api.actions import router as actions_router
 from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.api.incidents import router as incidents_router
+from app.api.metrics import router as metrics_router
 from app.config import Settings, get_settings
 from app.observability.logging import configure_logging
 from app.persistence.db import create_db_engine, create_session_factory
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(incidents_router, prefix="/api/v1")
     app.include_router(actions_router, prefix="/api/v1")
+    app.include_router(metrics_router, prefix="/api/v1")
     return app
 
 

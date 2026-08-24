@@ -1,72 +1,37 @@
 """Integration test fixtures.
 
 Isolation contract: tests run against a DEDICATED `cyber_test` database on the
-same Postgres server — created and migrated automatically once per session.
-The dev/demo database (`cyber`) is never touched by the suite; Redis uses
-logical db /1 to stay clear of live workers.
+same Postgres server — created and migrated automatically regardless of which
+test file executes first (see tests/integration/_db.py). The dev/demo database
+(`cyber`) is never touched by the suite; Redis uses logical db /1 to stay clear
+of live workers.
 """
 
-import os
-
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.engine import create_engine as sa_create_engine
 
 from app.config import Settings
+from app.main import create_app  # noqa: F401 (used by app_client fixture)
 from app.persistence.db import create_db_engine, create_session_factory
+from app.persistence.models import UserRow
+from app.security import hash_password  # noqa: F401 (fixtures below)
 from app.workers.connections import create_redis
+from tests.integration._db import base_env_settings, ensure_test_database
 
-TEST_DB = "cyber_test"
-
-
-def _base_settings() -> Settings:
-    return Settings(
-        _env_file=None,  # type: ignore[call-arg]
-        database_url=os.environ["DATABASE_URL"],
-        redis_url=os.environ["REDIS_URL"].rsplit("/", 1)[0] + "/1",
-    )
-
-
-def _ensure_test_database(settings: Settings) -> None:
-    """Create cyber_test if absent and bring its schema to head."""
-    admin_url = settings.database_url.get_secret_value().rsplit("/", 1)[0] + "/postgres"
-    admin = sa_create_engine(admin_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as conn:
-        exists = conn.execute(
-            text("SELECT 1 FROM pg_database WHERE datname = :d"), {"d": TEST_DB}
-        ).first()
-        if not exists:
-            conn.execute(text(f"CREATE DATABASE {TEST_DB}"))
-    admin.dispose()
-
-    test_url = settings.database_url.get_secret_value().rsplit("/", 1)[0] + f"/{TEST_DB}"
-
-    from alembic import command
-    from alembic.config import Config
-
-    old_env = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = test_url
-    try:
-        cfg = Config("alembic.ini")
-        cfg.set_main_option("script_location", "migrations")
-        command.upgrade(cfg, "head")
-    finally:
-        if old_env is None:
-            os.environ.pop("DATABASE_URL", None)
-        else:
-            os.environ["DATABASE_URL"] = old_env
+ADMIN_EMAIL = "admin@test.local"
+ADMIN_PASSWORD = "test-admin-pass"
+USER_EMAIL = "approver@test.local"
 
 
 @pytest.fixture(scope="session")
 def it_settings() -> Settings:
-    settings = _base_settings()
-    _ensure_test_database(settings)
-    # point everything at the isolated database
-    test_url = settings.database_url.get_secret_value().rsplit("/", 1)[0] + f"/{TEST_DB}"
+    base = base_env_settings()
+    test_url = ensure_test_database(base)
     return Settings(
         _env_file=None,  # type: ignore[call-arg]
         database_url=test_url,
-        redis_url=settings.redis_url,
+        redis_url=base.redis_url,
     )
 
 
@@ -91,9 +56,57 @@ def clean_db(session_factory):
         session.execute(
             text(
                 "TRUNCATE events, entities, detections, entity_metric_state,"
-                " worker_cursors, incidents, incident_detections, llm_calls"
-                " RESTART IDENTITY CASCADE"
+                " worker_cursors, incidents, incident_detections, llm_calls,"
+                " actions, playbooks, audit_log RESTART IDENTITY CASCADE"
             )
         )
         session.commit()
     yield session_factory
+
+
+# ---- shared API test fixtures ------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def _module_test_url():
+    return ensure_test_database(base_env_settings())
+
+
+@pytest.fixture(scope="module")
+def _module_session_factory(_module_test_url: str):
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        database_url=_module_test_url,
+        redis_url=base_env_settings().redis_url,
+    )
+    return create_session_factory(create_db_engine(settings))
+
+
+@pytest.fixture(scope="module")
+def app_client(_module_session_factory, _module_test_url: str):
+    """One authenticated API instance per module; admin/approver provisioned."""
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        database_url=_module_test_url,
+        redis_url=base_env_settings().redis_url,
+        admin_password=ADMIN_PASSWORD,
+        admin_email=ADMIN_EMAIL,
+        app_env="dev",
+    )
+    # idempotent provisioning across runs (users table survives truncations)
+    with _module_session_factory() as s, s.begin():
+        s.query(UserRow).filter(UserRow.email.in_([ADMIN_EMAIL, USER_EMAIL])).delete(
+            synchronize_session=False
+        )
+        s.add(UserRow(email=ADMIN_EMAIL, password_hash=hash_password(ADMIN_PASSWORD), role="admin"))
+        s.add(
+            UserRow(email=USER_EMAIL, password_hash=hash_password("approver-pass"), role="approver")
+        )
+
+    application = create_app(settings)
+    with TestClient(application) as client:
+        yield client
+
+
+def _base_env_settings_alias():  # kept for backward-compat imports in tests
+    return base_env_settings()

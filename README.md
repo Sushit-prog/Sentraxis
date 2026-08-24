@@ -44,6 +44,17 @@ curl http://localhost:8000/readyz    # -> {"status":"ready","checks":{...}}
 
 Interactive API docs: <http://localhost:8000/docs>
 
+## Operations runbook
+
+| Task | Command |
+| --- | --- |
+| Verify audit ledger integrity | `make audit-verify` |
+| Check LLM provider status | `make check-llm` |
+| Detection evaluation | `make eval-detect` |
+| Correlation golden-set eval | `make eval-correlate` |
+| Throughput benchmark | `make gen-bulk && make bench` |
+| Metrics | `GET /api/v1/metrics` (Bearer token; DB-derived gauges, 5s cache) |
+
 ## Development
 
 ```bash
@@ -86,7 +97,7 @@ docs/decisions/     # architecture decision records
 | 3 | Incidents + rule/LLM correlation + JWT/RBAC API                | 🚧 ([ADR-006](docs/decisions/ADR-006-llm-contracts.md)) |
 | 4 | LLM gateway + agent + golden-set eval + full ATT&CK index      | ✅ live via Groq gpt-oss-120b: 17/17 golden coverage, 0 hallucinations, injection probe held |
 | 5 | Response orchestrator + playbooks + approvals + audit chain    | ✅ ([ADR-007](docs/decisions/ADR-007-blast-radius-hitl.md)) |
-| 6 | Observability + load testing + security review                 | ⬜     |
+| 6 | Prometheus metrics + security review + abuse-resistance tests  | ✅ ([docs/security.md](docs/security.md)) |
 | 7 | Golden-set evaluation suite + published metrics                | ⬜     |
 | 8 | prod-lite deployment + demo scenario + documentation polish    | ⬜     |
 

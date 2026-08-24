@@ -5,63 +5,12 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
-from tests.integration._db import base_env_settings, ensure_test_database
-
 pytestmark = [pytest.mark.integration]
 
 T0 = datetime(2026, 8, 24, 9, 0, 0, tzinfo=UTC)
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "test-admin-pass"
 USER_EMAIL = "approver@test.local"
-
-
-@pytest.fixture(scope="module")
-def app_client(_module_session_factory, _module_test_url):
-    """One app instance per module; seeding runs via lifespan."""
-    from app.config import Settings
-    from app.persistence.models import UserRow
-    from app.security import hash_password
-
-    settings = Settings(
-        _env_file=None,  # type: ignore[call-arg]
-        database_url=_module_test_url,
-        redis_url=base_env_settings().redis_url,
-        admin_password=ADMIN_PASSWORD,
-        admin_email=ADMIN_EMAIL,
-        app_env="dev",
-    )
-    # provision users before the app lifespan runs (idempotent across runs)
-    with _module_session_factory() as s, s.begin():
-        s.query(UserRow).filter(UserRow.email.in_([ADMIN_EMAIL, USER_EMAIL])).delete(
-            synchronize_session=False
-        )
-        s.add(UserRow(email=ADMIN_EMAIL, password_hash=hash_password(ADMIN_PASSWORD), role="admin"))
-        s.add(
-            UserRow(email=USER_EMAIL, password_hash=hash_password("approver-pass"), role="approver")
-        )
-
-    application = create_app(settings)
-    with TestClient(application) as client:
-        yield client
-
-
-@pytest.fixture(scope="module")
-def _module_test_url():
-    return ensure_test_database(base_env_settings())
-
-
-@pytest.fixture(scope="module")
-def _module_session_factory(_module_test_url):
-    from app.config import Settings
-    from app.persistence.db import create_db_engine, create_session_factory
-
-    settings = Settings(
-        _env_file=None,  # type: ignore[call-arg]
-        database_url=_module_test_url,
-        redis_url=base_env_settings().redis_url,
-    )
-    return create_session_factory(create_db_engine(settings))
 
 
 def _login(client: TestClient, email: str, password: str):
